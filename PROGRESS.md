@@ -8,7 +8,7 @@
 - Docs: `docs/` (README index, getting-started, architecture, backend, redis, api, field-types-and-conditions, frontend, embedding, testing, vite-migration).
 
 ## How to run
-Redis + `cd server && npm start` + `cd web && npm run dev` (http://localhost:8081). E2E: `cd e2e && node e2e.js`. Details: docs/getting-started.md.
+`npm run dev` from the repo root starts Redis (if needed), the API and the web app (http://localhost:8081); or run the three parts manually. E2E: `cd e2e && node e2e.js`. Details: docs/getting-started.md.
 
 ---
 (Older notes below describe the Expo-era build; that code no longer exists — the app now lives in `web/`.)

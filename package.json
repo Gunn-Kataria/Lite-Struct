@@ -3,6 +3,7 @@
   "private": true,
   "description": "Lite Tstruct Builder: Express + Redis API (server/) and a React + Vite app / embeddable library (web/)",
   "scripts": {
+    "dev": "node scripts/dev.js",
     "dev:server": "npm --prefix server start",
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web run build",

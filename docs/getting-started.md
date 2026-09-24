@@ -5,7 +5,7 @@
 | Tool | Notes |
 |---|---|
 | Node.js 20+ | Developed on Node 22 |
-| Redis | Any recent version, reachable on `localhost:6379` by default. No modules needed (plain strings, sets and one hash) |
+| Redis | A Redis server the API can reach (default `localhost:6379`; set `REDIS_HOST`/`REDIS_PORT` for another machine). It is **not** installed by `npm install`. No modules needed. Windows options: Memurai (Redis-compatible), WSL, or Docker (`docker run -d -p 6379:6379 redis`). `redis-server` on your `PATH` is only needed for `npm run dev` to start it for you |
 | A modern browser | Chrome/Edge/Firefox/Safari |
 
 ## Install
@@ -17,9 +17,24 @@ cd ../web && npm install
 cd ../e2e && npm install
 ```
 
-## Run
+## Run — one command
 
-Three terminals:
+From the repository root:
+
+```bash
+npm run dev
+```
+
+This script (`scripts/dev.js`, no extra dependencies) will:
+
+1. install `server/` and `web/` dependencies if `node_modules` is missing (first run only),
+2. check Redis and start a local `redis-server` if nothing is listening on the port (it must be on your `PATH`; a Redis that already runs, e.g. as a service, is left alone; with `REDIS_HOST` pointing at another machine it only checks that it is reachable and never starts one),
+3. start the API (`:4000`) and the web app (`:8081`), reusing any that are already running,
+4. print `Ready -> http://localhost:8081` and prefix every log line with `[redis]`, `[api]` or `[web]`.
+
+**Ctrl+C** stops the API and web app (and Redis, only if the script started it). If the script exits with a message such as "redis-server was not found", install Redis or start it yourself and run again.
+
+## Run — manually (three terminals)
 
 ```bash
 # 1. Redis  (skip if it is already running as a service)
@@ -32,7 +47,7 @@ cd server && npm start          # node src/index.js   (npm run dev uses nodemon)
 cd web && npm run dev           # Vite dev server (hot reload)
 ```
 
-Or from the repository root: `npm run dev:server` and `npm run dev:web`.
+Root shortcuts for the two Node parts: `npm run dev:server` and `npm run dev:web`.
 
 Open <http://localhost:8081>. API health check: `GET http://localhost:4000/health` → `{"ok":true}`. The host-application demo is at <http://localhost:8081/host-demo.html> (see [embedding.md](embedding.md)).
 
