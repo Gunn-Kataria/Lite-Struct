@@ -1,11 +1,26 @@
 # Lite Tstruct Builder — Progress
 
 ## Current state (latest)
-- **Frontend is now React + Vite** (`web/`), replacing the React Native Web / Expo app (the old Expo code has been deleted). Same routes, design and behaviour; the unchanged 157-check e2e suite passed on the new build, and the suite is now **183/183** with the embedding checks.
+- **Frontend is now React + Vite** (`web/`), replacing the React Native Web / Expo app (the old Expo code has been deleted). Same routes, design and behaviour; the unchanged 157-check e2e suite passed on the new build, and the suite grew with the embedding checks and is now **264/264** including the Options feature.
 - **Host-embedding pieces (done)**: struct `key` (stable alias usable instead of the id everywhere), record `ref` + `meta` with `?ref=` filtering, `X-Tstruct-User` header, optional `API_TOKEN` bearer auth and `CORS_ORIGINS` allow-list; embeddable library `@tstruct/react` (`<StructForm>`, `<RecordList>`, `<TstructProvider>`, `configure()`, brand overrides); chrome-less iframe pages `/embed/:struct/form|records` with postMessage events; `host-demo.html` as a working example. See docs/embedding.md.
 - Form fix: the column grid now follows the container width (ResizeObserver) so it can't go stale (a hot-reloaded tab could show a single column).
 - Selection-field error message now names the failing host and hints at CORS.
 - Docs: `docs/` (README index, getting-started, architecture, backend, redis, api, field-types-and-conditions, frontend, embedding, testing, vite-migration).
+
+## Phase: "Configuring Options" (standalone feature) — built
+
+An **Option** is a standalone configurable action, unrelated to any struct, with its own nav entry (**Options** in the sidebar, `/options`), storage, API and screens. Full guide: docs/options.md.
+
+- **Redis**: `option:<id>` + set `options:index`; file metadata `file:<id>` + set `files:index` (uuid ids, JSON strings, same conventions as structs/records).
+- **File storage**: uploads go to `server/uploads/` (`<uuid>-<name>`, git-ignored, `UPLOAD_DIR` / `MAX_UPLOAD_MB`); `POST /api/files` (multipart), `GET /api/files` (metadata list, used to pick an earlier upload), `GET /api/files/:id` (streams with `Content-Disposition: attachment`). Tested with curl on a real binary file (byte-for-byte identical, UTF-8 names round-trip).
+- **API**: `POST/GET/GET one/PUT/DELETE /api/options` with per-type config validation (`dataInput {structName}`, `download {fileId}` (file must exist), `upload {}`, `apiDisplay {apiName, displayAs}`, `pay {paymentConfig}`, `axpertOption {subtype, target}`). Tested with curl (all types, all validation errors, CRUD, delete keeps the file).
+- **Functional types**: `dataInput` (looks the struct up by name — case-insensitive — via `GET /api/structs`, then opens its form), `download` (real browser download of the stored file), `upload` (file picker → `POST /api/files` → shows the fileId, "Download it back"). **Config-only**: `apiDisplay`, `pay`, `axpertOption` (configurable + listed; running shows "This option type isn't wired up yet").
+- **Screens**: OptionsList (`/options`), OptionBuilder (`/options/new`, `/options/:id/edit`; id read-only, caption, type dropdown with all six types' config fields, file upload/pick for `download`, Applicable-to), OptionRun (`/options/:id/run`).
+- **"Applicable to"** (config only — stored, never enforced; no user identity exists): the shape from the brief — `userCategories` (multi-select, scope all/selected) plus an **Affiliate scope** block (shown when `userCategories contains "affiliate"`) and an **Employee scope** block (departments/branches/designations, each all-or-selected; shown when it contains `"employee"`). Block visibility is driven by the existing `evaluateCondition`; its `contains` operator already supported membership in an array on both client and server, so **no extension was needed**. Hidden blocks are not saved (like hidden fields).
+- **Integration path designed for (both, no changes needed here)**: (1) the standalone route `/options` and the chrome-less iframe routes `/embed/options[/new|/:id/edit|/:id/run]` (postMessage events `option-saved`, `option-deleted`, `option-run`, `resize`); (2) the three screens are self-contained components (`OptionsList`, `OptionBuilder`, `OptionRun` in `web/src/ui/options`, exported from `@tstruct/react`) that use **no router and no app-level nav state** — the host decides what "open this struct" means via `OptionRun`'s `onOpenStruct` callback (inline form when absent). `host-demo.html?options=1` demonstrates path 2.
+- **Assumption to confirm**: the brief said the "applicable to" shape is the same as "the previous prompt", which was not available; the final message's description (categories + two scope blocks with `contains` conditions) was implemented. If your original shape differs, only `web/src/core/options.js`, `server/src/lib/applicableTo.js` and `web/src/ui/options/ApplicableTo.jsx` need to change.
+- **Out of scope (unchanged)**: real integrations for `apiDisplay` / `pay` / `axpertOption`; enforcing "applicable to" at run time; validating that a struct name exists before run time.
+- **Docs updated**: options.md (new), api.md, redis.md, backend.md, frontend.md, embedding.md, architecture.md, getting-started.md, testing.md, README.md.
 
 ## How to run
 `npm run dev` from the repo root starts Redis (if needed), the API and the web app (http://localhost:8081); or run the three parts manually. E2E: `cd e2e && node e2e.js`. Details: docs/getting-started.md.

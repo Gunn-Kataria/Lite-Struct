@@ -30,11 +30,13 @@ web/
     ├── core/                         framework-free logic (no React)
     │   ├── api.js                    REST client + configure()
     │   ├── conditions.js, validation.js, builderModel.js, format.js, logger.js
+    │   ├── options.js                option types, "applicable to" blocks/logic (reuses evaluateCondition)
     │   ├── fieldTypes.js             field-type catalogue (icon names, not components)
     │   ├── tokens.js                 design tokens + buildTheme(mode, overrides)
     │   └── embedBridge.js            postMessage helper for iframes
     ├── ui/                           reusable React components (also exported)
     │   ├── kit/                      Text, Button/IconButton, Input, Select, SwitchField, Card/Badge/Avatar/Skeleton/EmptyState/HoverCard/Alert/IconTile, Sheet, Toast
+    │   ├── options/                  OptionsList, OptionBuilder, OptionRun, ApplicableTo (self-contained; no router)
     │   ├── builder/                  StructBuilder, TypePickerSheet, FieldEditorSheet, SectionEditorSheet, FieldTypeExtras, ConditionEditor
     │   ├── DynamicForm.jsx, DynamicField.jsx, StructForm.jsx (StructForm + RecordList)
     │   ├── RecordTable.jsx, RecordDetail.jsx, RecordsBrowser.jsx
@@ -55,6 +57,10 @@ web/
 | `/structs/:id/records` | `RecordPages.jsx` → `Records` | Table/cards + search + detail drawer |
 | `/structs/:id/form` | `NewRecord` | Full-width form (1/2/3 columns) |
 | `/structs/:id/record/:recordId` | `EditRecord` | Form pre-filled with a saved record |
+| `/options` | `OptionPages.jsx` → `OptionsPage` | **Options** list (own sidebar entry; standalone feature, see [options.md](options.md)) |
+| `/options/new`, `/options/:optionId/edit` | `OptionBuilderPage` | Option builder |
+| `/options/:optionId/run` | `OptionRunPage` | Run an option (dataInput → `/structs/:id/form`, download, upload, placeholders) |
+| `/embed/options`, `/embed/options/new`, `/embed/options/:id/edit\|run` | `OptionEmbed.jsx` | Chrome-less Options pages for iframes |
 | `/embed/:structRef/form` | `Embed.jsx` | Chrome-less form for iframes (see [embedding.md](embedding.md)) |
 | `/embed/:structRef/records` | `Embed.jsx` | Chrome-less records list |
 
@@ -87,6 +93,14 @@ Breakpoints: 960 px (sidebar vs stacked), 720 px (records table vs cards; drawer
 * `Sheet` — right drawer (bottom sheet on narrow), portal, Esc/backdrop/X close.
 * `HoverCard` — clickable card that lifts on hover; a plain `div` (may contain buttons).
 * `useToast().show({ title, message, type })`.
+
+## Options (`ui/options/`)
+Self-contained screens (no router, no global nav state) so a host can import them or iframe their routes; the studio pages are thin wrappers that turn callbacks into navigation.
+* `OptionsList` — cards (caption, type badge, "Config only", applicable-to summary), Run / Edit / Delete (confirmation drawer), search.
+* `OptionBuilder` — id (read-only), caption, type dropdown, per-type config (`download` has upload-or-pick-a-file), and `ApplicableTo`.
+* `ApplicableTo` — user categories (All / Selected + toggle chips + custom tags) and the **Affiliate scope** / **Employee scope** blocks, shown by `visibleBlocks()` = `evaluateCondition` on `{ userCategories }` (animated in/out like struct sections).
+* `OptionRun` — `dataInput`: lookup by name → `onOpenStruct(struct)` (inline form when the callback is absent), "Struct not found" state; `download`: real browser download + "Download again"; `upload`: drop zone / picker → `fileId` → "Download it back"; other types: "isn't wired up yet".
+* API helpers in `core/api.js`: `listOptions/getOption/createOption/updateOption/deleteOption`, `listFiles`, `uploadFile(file)` (multipart), `downloadFile(fileId)` (fetch + blob + temporary `<a download>`, reads the name from `Content-Disposition`).
 
 ## State
 
@@ -133,7 +147,7 @@ Headers sent: `Content-Type`, `Authorization: Bearer <token>` (when `getAuthToke
 
 ## Test hooks & accessibility
 
-Interactive elements carry `data-testid`s and ARIA roles/labels (used by the e2e suite): `new-struct`, `nav-overview`, `nav-definitions`, `nav-struct-<name>`, `theme-toggle`, `home-struct-<name>`, `def-<name>`, `edit-<name>`, `add-record`, `edit-definition`, `record-<n>`, `record-detail`, `edit-record`, `struct-name`, `struct-key`, `add-field`, `add-section`, `type-<label>`, `field-name`, `save-field`, `section-name`, `save-section`, `field-row-<i>`, `save-struct`, `submit`. Sidebar items expose `aria-current="page"`; dropdown options `role="option"` + `aria-selected`; drawers `role="dialog"`.
+Interactive elements carry `data-testid`s and ARIA roles/labels (used by the e2e suite): `new-struct`, `nav-overview`, `nav-options`, `nav-definitions`, `new-option`, `option-<caption>`, `run-<caption>`, `edit-option-<caption>`, `delete-option-<caption>`, `option-caption`, `option-type`, `option-id`, `cfg-*`, `option-file-input`, `pick-file`, `selected-file`, `save-option`, `run-file-input`, `upload-drop`, `uploaded-file-id`, `not-wired`, `struct-not-found`, `applicable-to`, `cat-<name>`, `block-<affiliate|employee>`, `scope-<block>-<field>-(all|selected)`, `nav-struct-<name>`, `theme-toggle`, `home-struct-<name>`, `def-<name>`, `edit-<name>`, `add-record`, `edit-definition`, `record-<n>`, `record-detail`, `edit-record`, `struct-name`, `struct-key`, `add-field`, `add-section`, `type-<label>`, `field-name`, `save-field`, `section-name`, `save-section`, `field-row-<i>`, `save-struct`, `submit`. Sidebar items expose `aria-current="page"`; dropdown options `role="option"` + `aria-selected`; drawers `role="dialog"`.
 
 ## Builds
 

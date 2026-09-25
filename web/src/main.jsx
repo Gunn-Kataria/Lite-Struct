@@ -14,6 +14,8 @@ import Definitions from './studio/pages/Definitions';
 import { EditStruct, NewStruct } from './studio/pages/StructPages';
 import { EditRecord, NewRecord, Records } from './studio/pages/RecordPages';
 import Embed from './studio/pages/Embed';
+import OptionEmbed from './studio/pages/OptionEmbed';
+import { OptionBuilderPage, OptionRunPage, OptionsPage } from './studio/pages/OptionPages';
 
 // Route map (same URLs as before the migration):
 //   /                                  Overview (or the struct list on narrow screens)
@@ -23,12 +25,20 @@ import Embed from './studio/pages/Embed';
 //   /structs/:id/records               Records
 //   /structs/:id/form                  New record
 //   /structs/:id/record/:recordId      Edit record
+//   /options                           Options list (standalone feature, unrelated to structs)
+//   /options/new                       New option
+//   /options/:optionId/edit|run        Edit / run an option
 //   /embed/:structRef/form|records     Chrome-less page for iframes
+//   /embed/options[/new|/:id/edit|run] Chrome-less Options pages for iframes
 createRoot(document.getElementById('root')).render(
   <AppThemeProvider>
     <GlobalStyle />
     <BrowserRouter>
       <Routes>
+        <Route path="/embed/options" element={<OptionEmbed view="list" />} />
+        <Route path="/embed/options/new" element={<OptionEmbed view="builder" />} />
+        <Route path="/embed/options/:optionId/edit" element={<OptionEmbed view="builder" />} />
+        <Route path="/embed/options/:optionId/run" element={<OptionEmbed view="run" />} />
         <Route path="/embed/:structRef/:view" element={<Embed />} />
         <Route
           element={
@@ -40,6 +50,10 @@ createRoot(document.getElementById('root')).render(
           }
         >
           <Route index element={<Home />} />
+          <Route path="options" element={<OptionsPage />} />
+          <Route path="options/new" element={<OptionBuilderPage mode="new" />} />
+          <Route path="options/:optionId/edit" element={<OptionBuilderPage mode="edit" />} />
+          <Route path="options/:optionId/run" element={<OptionRunPage />} />
           <Route path="structs" element={<Definitions />} />
           <Route path="structs/new" element={<NewStruct />} />
           <Route path="structs/:id/edit" element={<EditStruct />} />

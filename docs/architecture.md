@@ -34,6 +34,8 @@
 | Field ids are stable | A field's `id` is generated from its name once, then never changes when the label is edited. Records reference values by field id, so renaming a field cannot orphan data |
 | Edit = replace | `PUT` replaces the whole definition / record `data`. Existing records are not migrated when a definition changes |
 | Only visible fields are saved | Fields hidden by a condition are skipped in validation and are not written to the record |
+| Options are their own entity | An Option is unrelated to any struct (it may point at one by name), has its own storage, API, screens and nav entry, and self-contained components so it can be linked, iframed or imported |
+| Files on local disk | Uploads are stored under `server/uploads/` with metadata in Redis; simple for one server, needs shared storage to scale out |
 | Struct `key` | Struct ids are UUIDs; an optional unique, readable key lets other applications refer to a struct stably ([embedding.md](embedding.md)) |
 | Record `ref` / `meta` | Let a host link records to its own entities and filter by them |
 
@@ -62,7 +64,12 @@
 * Existing fields/sections keep their ids (`draft.id`); new ones get generated ids that avoid collisions. Save → `PUT /api/structs/:id`.
 * Because records are not migrated: renaming is safe, removing a field hides its saved values, changing a field's type may leave old values invalid. The edit screen warns when records exist.
 
-### 5. Conditions
+### 5. Options (standalone actions)
+* **Create/edit** (`/options/new`): caption + type + per-type config + "applicable to" → `POST/PUT /api/options`. For a `download` option the builder first uploads the file with `POST /api/files` (or picks an earlier upload) and stores its `fileId`.
+* **Run** (`/options/:id/run`): `dataInput` → `GET /api/structs`, find the struct by name, navigate to `/structs/:id/form`; `download` → `GET /api/files/:fileId` (fetch + blob → browser download); `upload` → file picker → `POST /api/files` → show the `fileId`; other types → "not wired up yet".
+* "Applicable to" is stored but **not enforced** (no user identity). Details: [options.md](options.md).
+
+### 6. Conditions
 * Stored on a field (`field.condition`) or a section (`section.condition`).
 * Client: `isFieldVisible(field, struct, formData)` → section condition AND field condition.
 * Server: `validateRecord` skips validation for fields whose condition (or section condition) is false, using the submitted `data`.

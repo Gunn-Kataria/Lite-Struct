@@ -4,7 +4,7 @@ The UI used to be React Native Web on Expo. Because this project is meant to liv
 
 ## Outcome
 
-* **Same product**: same routes/URLs, same design (tokens, orange theme, dark mode), same behaviour. The **entire end-to-end suite that was written against the Expo build passed unchanged on the Vite build (157/157)** before any new tests were added; it now has 183 checks including embedding ([testing.md](testing.md)).
+* **Same product**: same routes/URLs, same design (tokens, orange theme, dark mode), same behaviour. The **entire end-to-end suite that was written against the Expo build passed unchanged on the Vite build (157/157)** before any new tests were added; it has since grown to 264 checks covering embedding and Options ([testing.md](testing.md)).
 * **Backend / Redis / API**: untouched by the migration (they gained the embedding features separately — see [api.md](api.md)).
 * **Bundle**: the Expo web bundle was ≈ 1.3 MB; the Vite studio app's main chunk is ≈ 90 kB (+ a ≈ 170 kB gzipped form/UI chunk) and the embeddable library is ≈ 105 kB gzipped.
 * **New capability**: the same code builds as an embeddable library (`npm run build:lib`) — see [embedding.md](embedding.md).

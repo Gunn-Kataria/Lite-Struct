@@ -3,3 +3,5 @@ dist
 dist-lib
 .expo
 *.log
+# uploaded files (user data, stored on the API server disk)
+server/uploads/

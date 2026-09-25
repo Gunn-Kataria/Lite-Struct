@@ -63,6 +63,8 @@ Open <http://localhost:8081>. API health check: `GET http://localhost:4000/healt
 | `LOG_LEVEL` | `debug` | pino level (`trace`…`fatal`) |
 | `API_TOKEN` | *(unset)* | when set, every `/api` request must send `Authorization: Bearer <token>` |
 | `CORS_ORIGINS` | *(unset = any origin)* | comma-separated list of allowed browser origins |
+| `UPLOAD_DIR` | `server/uploads` | where uploaded files (Options → download/upload) are stored on disk |
+| `MAX_UPLOAD_MB` | `25` | maximum size of one uploaded file |
 
 ### Web app
 
@@ -98,13 +100,17 @@ Serve `web/dist` from any static host **with an SPA fallback** (unknown paths �
 
 ## Resetting data
 
-There is no delete API (deleting structs/records is out of scope). To wipe everything the app has created:
+There is no delete API for structs, records or files (options can be deleted in the UI). To wipe everything the app has created:
 
 ```bash
 redis-cli --scan --pattern 'struct:*'  | xargs redis-cli del
 redis-cli --scan --pattern 'record:*'  | xargs redis-cli del
 redis-cli --scan --pattern 'records:*' | xargs redis-cli del
-redis-cli del structs:index structs:keys
+redis-cli --scan --pattern 'option:*' | xargs redis-cli del
+redis-cli --scan --pattern 'file:*'   | xargs redis-cli del
+redis-cli del structs:index structs:keys options:index files:index
+# and the uploaded files themselves:
+rm -rf server/uploads/*
 ```
 
 (Or `FLUSHDB` if the Redis database is used only for this app.) See [redis.md](redis.md).

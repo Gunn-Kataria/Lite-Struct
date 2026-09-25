@@ -17,6 +17,10 @@ Connection: `REDIS_HOST` (default `127.0.0.1`), `REDIS_PORT` (default `6379`), n
 | `record:<structId>:<recordId>` | string | JSON record |
 | `records:<structId>:index` | set | all `recordId`s of that struct |
 | `structs:keys` | hash | `key` → `structId` for structs that have a key (e.g. `leave-request` → `5b0c…`) |
+| `option:<optionId>` | string | JSON option (standalone configurable action) |
+| `options:index` | set | all `optionId`s |
+| `file:<fileId>` | string | JSON metadata of an uploaded file (the bytes are on the API server's disk, not in Redis) |
+| `files:index` | set | all `fileId`s |
 
 Ids are UUID v4 (`uuid` package).
 
@@ -78,6 +82,22 @@ record:s1:r1                       → {"id":"r1","structId":"s1","data":{...}, 
 ```
 `ref` and `meta` are optional (set by a host application). Data conventions: numbers are stored as JSON numbers; dates as `YYYY-MM-DD`; times as `HH:MM`; mobile numbers in E.164; `location` as `{lat, lng}`; only fields visible at submit time are present.
 
+### Option — `option:<optionId>`
+```json
+{ "id": "e82a…", "caption": "Apply for leave", "type": "dataInput", "config": { "structName": "Leave Request" },
+  "applicableTo": { "userCategories": { "scope": "all", "selected": [] }, "affiliate": { "affiliates": { "scope": "all", "selected": [] } },
+                    "employee": { "departments": { "scope": "all", "selected": [] }, "branches": { "scope": "all", "selected": [] }, "designations": { "scope": "all", "selected": [] } } },
+  "createdBy": "anonymous", "createdAt": "…", "modifiedBy": "…", "modifiedAt": "…" }
+```
+`config` depends on `type` (see [options.md](options.md)); `modified*` only after an edit.
+
+### File metadata — `file:<fileId>`
+```json
+{ "id": "c3a7…", "originalName": "policy.pdf", "mimeType": "application/pdf", "size": 300000,
+  "storedPath": "<server>/uploads/c3a7…-policy.pdf", "uploadedAt": "…", "uploadedBy": "anonymous" }
+```
+`storedPath` is internal and is never sent to clients.
+
 ## Commands per API call
 
 | Endpoint | Redis commands |
@@ -89,6 +109,14 @@ record:s1:r1                       → {"id":"r1","structId":"s1","data":{...}, 
 | `POST /api/structs/:id/records` | `GET struct:<id>` → `SET record:<id>:<rid>` → `SADD records:<id>:index <rid>` |
 | `GET /api/structs/:id/records` | `SMEMBERS records:<id>:index` → `GET record:<id>:<rid>` per member |
 | `GET /api/structs/:id/records/:rid` | `GET record:<id>:<rid>` |
+| `POST /api/options` | (`download`: `GET file:<id>` to check the file exists) → `SET option:<id>` → `SADD options:index <id>` |
+| `GET /api/options` | `SMEMBERS options:index` → `GET option:<id>` per member |
+| `GET /api/options/:id` | `GET option:<id>` |
+| `PUT /api/options/:id` | `GET option:<id>` → `SET option:<id>` |
+| `DELETE /api/options/:id` | `GET option:<id>` → `DEL option:<id>` → `SREM options:index <id>` |
+| `POST /api/files` | file written to disk → `SET file:<id>` → `SADD files:index <id>` |
+| `GET /api/files` | `SMEMBERS files:index` → `GET file:<id>` per member |
+| `GET /api/files/:id` | `GET file:<id>` (then the file is streamed from disk) |
 | `PUT /api/structs/:id/records/:rid` | `GET struct:<id>` → `GET record:<id>:<rid>` → `SET record:<id>:<rid>` |
 
 Every call is logged by the server (`redis.get`, `redis.set`, `redis.sadd`, `redis.smembers`, `redis.scard`).
@@ -115,6 +143,8 @@ redis-cli monitor                                  # watch the API's commands li
 ```
 
 ## Cleanup / reset
+
+> Uploaded **files live on disk** (`server/uploads/`), not in Redis. Removing `file:*` keys does not delete the bytes: also delete the file at `storedPath`. Redis and `server/uploads/` should be backed up together.
 
 Remove one struct and its records (Node, from the repo root):
 ```js

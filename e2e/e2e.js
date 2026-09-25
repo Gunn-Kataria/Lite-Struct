@@ -8,7 +8,9 @@ const SHOTS = process.env.SHOTS_DIR || '.';
 const results = [];
 const check = (name, ok, extra) => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  -> ' + (extra ?? '')}`); };
 let page;
+let currentStep = '';
 const step = async (name, fn) => {
+  currentStep = name;
   try { await fn(); } catch (e) {
     check(name + ' (threw)', false, e.message.split('\n').slice(0, 3).join(' | '));
     try { await page.screenshot({ path: `${SHOTS}/fail_${name.replace(/\W+/g, '_')}.png` }); } catch (_) {}
@@ -23,12 +25,19 @@ http.createServer((req, res) => {
 
 (async () => {
   const existing = new Set(((await (await fetch(`${API}/api/structs`)).json()).structs || []).map(s => s.id));
+  const existingOptions = new Set(((await (await fetch(`${API}/api/options`)).json()).options || []).map(o => o.id));
+  const existingFiles = new Set(((await (await fetch(`${API}/api/files`)).json()).files || []).map(f => f.id));
   const b = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['geolocation'], geolocation: { latitude: 12.9716, longitude: 77.5946 } });
   const p = await ctx.newPage(); page = p;
   const errs = [];
   p.on('pageerror', e => errs.push(e.message));
-  p.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
+  p.on('console', async m => {
+    if (m.type() !== 'error') return;
+    let text = m.text().slice(0, 200);
+    if (text.includes('same key')) { const a = await Promise.all(m.args().map(x => x.jsonValue().catch(() => '?'))); text = `[${currentStep}] duplicate React key: ${JSON.stringify(a.slice(1))}`; }
+    errs.push(text);
+  });
   const txt = () => p.innerText('body');
   const has = async (t) => (await txt()).includes(t);
   const vis = (loc) => loc.locator('visible=true');
@@ -478,6 +487,216 @@ http.createServer((req, res) => {
     await c2.close();
   });
 
+  // ---------------------------------------------------------------- options + files
+  await step('options', async () => {
+    const H = { 'content-type': 'application/json' };
+    const post = (path, body) => fetch(API + path, { method: 'POST', headers: H, body: JSON.stringify(body) });
+    const optType = (name) => choose(tid('option-type'), name);
+    const fillCaption = (c) => tid('option-caption').fill(c);
+    const saveOpt = async () => { await tid('save-option').click(); await wait(700); };
+    const pngish = (n, seed) => Buffer.from(Array.from({ length: n }, (_, i) => (i * 7 + seed) % 256));
+    const readDl = async (dl) => require('fs').readFileSync(await dl.path());
+    const getOpt = async (id) => (await (await fetch(`${API}/api/options/${id}`)).json()).option;
+    const findOpt = async (caption) => (await (await fetch(`${API}/api/options`)).json()).options.find(o => o.caption === caption);
+
+    // a struct for the dataInput option to open (typed in a different case on purpose: the lookup is case-insensitive)
+    const target = (await (await post('/api/structs', { name: 'Options Target', fields: [{ id: 'note', label: 'Note', type: 'text', required: true }] })).json());
+
+    await p.goto(APP); await p.waitForTimeout(2000);
+    await tid('nav-options').click(); await p.waitForTimeout(1200);
+    check('options: own nav entry -> /options', /\/options$/.test(p.url()) && (await tid('nav-options').getAttribute('aria-current')) === 'page');
+    check('options: list screen', (await has('Options')) && (await tid('new-option').count()) === 1);
+
+    // ---- builder validation
+    await tid('new-option').click(); await p.waitForTimeout(1200);
+    check('options builder: route + id read-only + all six types', /\/options\/new$/.test(p.url()) && (await tid('option-id').inputValue()) === '' && (await tid('option-id').getAttribute('readonly')) !== null);
+    await tid('option-type').click(); await wait(300);
+    const typeNames = await vis(p.getByRole('option')).allInnerTexts();
+    await p.keyboard.press('Escape'); await wait(300);
+    check('options builder: type dropdown lists all six', ['Data input', 'Download', 'Upload', 'API display', 'Pay', 'Axpert option'].every(n => typeNames.some(t => t.startsWith(n))), typeNames.join('|'));
+    await saveOpt();
+    check('options builder: caption required', await has('Give the option a caption'));
+    await fillCaption('Apply for E2E leave'); await saveOpt();
+    check('options builder: dataInput needs a struct name', await has('Enter the name of the struct'));
+
+    // ---- dataInput: create, run, land on the struct's form
+    await tid('cfg-structName').fill('options target'); await saveOpt();
+    check('options: dataInput created (toast + listed)', (await has('Option created')) && (await tid('option-Apply for E2E leave').count()) === 1);
+    const di = await findOpt('Apply for E2E leave');
+    check('options: dataInput stored (config + default applicableTo)', di && di.type === 'dataInput' && di.config.structName === 'options target' && di.applicableTo.userCategories.scope === 'all' && !!di.applicableTo.employee, JSON.stringify(di));
+    await tid('run-Apply for E2E leave').click();
+    await p.waitForURL(new RegExp(`/structs/${target.structId}/form$`), { timeout: 8000 });
+    await wait(1500);
+    check('options RUN dataInput: opened the linked struct\'s form', (await has('New Options Target record')) && (await has('Note')));
+    // the form really works from there
+    await inputOf('Note').fill('from an option'); await tid('submit').click(); await p.waitForURL(/\/records$/, { timeout: 8000 });
+    check('options RUN dataInput: record saved through that form', ((await (await fetch(`${API}/api/structs/${target.structId}/records`)).json()).records[0]?.data.note) === 'from an option');
+    // struct not found
+    await post('/api/options', { caption: 'Ghost option', type: 'dataInput', config: { structName: 'No Such Struct 12345' } });
+    await p.goto(APP + '/options'); await p.waitForTimeout(1500);
+    await tid('run-Ghost option').click(); await wait(1500);
+    check('options RUN dataInput: unknown struct -> "Struct not found" state', (await tid('struct-not-found').count()) === 1 && (await has('No struct named')));
+
+    // ---- download: upload a file in the builder, attach, run -> real browser download
+    const content = pngish(4096, 3);
+    const fname = 'rapport été ✓.txt';
+    await p.goto(APP + '/options/new'); await p.waitForTimeout(1500);
+    await fillCaption('Get policy'); await optType('Download');
+    check('options builder: download shows the file picker', (await has('Upload a file')) && (await tid('option-file-input').count()) === 1);
+    await saveOpt();
+    check('options builder: download needs a file', await has('Attach a file'));
+    await tid('option-file-input').setInputFiles({ name: fname, mimeType: 'text/plain', buffer: content }); await wait(1500);
+    check('options builder: uploaded file is attached (name + size shown)', (await tid('selected-file').innerText()).includes(fname) && (await tid('selected-file').innerText()).includes('4.0 KB'));
+    await saveOpt();
+    const dl1 = await findOpt('Get policy');
+    check('options: download stored with the fileId', dl1 && dl1.type === 'download' && !!dl1.config.fileId, JSON.stringify(dl1));
+    const meta = (await (await fetch(`${API}/api/files`)).json()).files.find(f => f.id === dl1.config.fileId);
+    check('files: metadata (name, size, mime), no server path exposed', meta.originalName === fname && meta.size === 4096 && meta.mimeType === 'text/plain' && !('storedPath' in meta), JSON.stringify(meta));
+    {
+      const [d] = await Promise.all([p.waitForEvent('download', { timeout: 10000 }), tid('run-Get policy').click()]);
+      check('options RUN download: browser download starts with the original file name', d.suggestedFilename() === fname, d.suggestedFilename());
+      check('options RUN download: downloaded bytes == uploaded bytes', Buffer.compare(await readDl(d), content) === 0);
+      await wait(600);
+      check('options RUN download: success state', (await tid('download-done').count()) === 1 && (await has('Download started')));
+      const [d2] = await Promise.all([p.waitForEvent('download', { timeout: 10000 }), tid('download-again').click()]);
+      check('options RUN download: "Download again" works', Buffer.compare(await readDl(d2), content) === 0);
+    }
+    // pick a previously uploaded file for a second option
+    await p.goto(APP + '/options/new'); await p.waitForTimeout(1500);
+    await fillCaption('Get policy again'); await optType('Download');
+    await choose(tid('pick-file'), `${fname} (4.0 KB)`);
+    check('options builder: previously uploaded file can be picked', (await tid('selected-file').innerText()).includes(fname));
+    await saveOpt();
+    const dl2 = await findOpt('Get policy again');
+    check('options: picked file -> same fileId, no second upload', dl2.config.fileId === dl1.config.fileId);
+
+    // ---- upload: run, pick a file, get a fileId, download that same file back
+    await p.goto(APP + '/options/new'); await p.waitForTimeout(1500);
+    await fillCaption('Send a document'); await optType('Upload');
+    check('options builder: upload needs no configuration', await has('No configuration needed'));
+    await saveOpt();
+    const up = await findOpt('Send a document');
+    check('options: upload stored with empty config', up && up.type === 'upload' && Object.keys(up.config).length === 0);
+    await tid('run-Send a document').click(); await wait(1200);
+    check('options RUN upload: shows the file picker', (await tid('upload-drop').count()) === 1 && (await tid('choose-file').count()) === 1);
+    const upBytes = pngish(9000, 11);
+    await tid('run-file-input').setInputFiles({ name: 'upload me.bin', mimeType: 'application/octet-stream', buffer: upBytes }); await wait(1500);
+    check('options RUN upload: success state with the resulting fileId', (await tid('upload-done').count()) === 1 && (await has('File uploaded')));
+    const newId = (await tid('uploaded-file-id').innerText()).trim();
+    check('options RUN upload: fileId is a real stored file', /^[0-9a-f-]{36}$/.test(newId) && (await fetch(`${API}/api/files/${newId}`)).status === 200);
+    const apiBytes = Buffer.from(await (await fetch(`${API}/api/files/${newId}`)).arrayBuffer());
+    check('files: API returns exactly the uploaded bytes', Buffer.compare(apiBytes, upBytes) === 0);
+    {
+      const [d] = await Promise.all([p.waitForEvent('download', { timeout: 10000 }), tid('download-back').click()]);
+      check('options RUN upload: "Download it back" returns the same file', d.suggestedFilename() === 'upload me.bin' && Buffer.compare(await readDl(d), upBytes) === 0);
+      await wait(500);
+      check('options RUN upload: shows what was downloaded back', await has('Downloaded “upload me.bin”'));
+    }
+    await tid('upload-another').click(); await wait(500);
+    check('options RUN upload: "Upload another" resets the picker', (await tid('upload-drop').count()) === 1);
+
+    // ---- config-only types: configurable in the builder, "not wired up yet" when run
+    await p.goto(APP + '/options/new'); await p.waitForTimeout(1500);
+    await fillCaption('Show balances'); await optType('API display (config only)');
+    await tid('cfg-apiName').fill('leaveBalances'); await choose(tid('cfg-displayAs'), 'Name / value pairs'); await saveOpt();
+    await p.goto(APP + '/options/new'); await p.waitForTimeout(1500);
+    await fillCaption('Pay the fee'); await optType('Pay (config only)');
+    await tid('cfg-paymentConfig').fill('gateway=stripe; amount=10'); await saveOpt();
+    await p.goto(APP + '/options/new'); await p.waitForTimeout(1500);
+    await fillCaption('Open iview'); await optType('Axpert option (config only)');
+    await choose(tid('cfg-subtype'), 'Iview'); await tid('cfg-target').fill('ivsales'); await saveOpt();
+    const api = await findOpt('Show balances'), pay = await findOpt('Pay the fee'), ax = await findOpt('Open iview');
+    check('options: apiDisplay config stored', api && api.config.apiName === 'leaveBalances' && api.config.displayAs === 'nameValuePair', JSON.stringify(api));
+    check('options: pay config stored', pay && pay.config.paymentConfig === 'gateway=stripe; amount=10', JSON.stringify(pay));
+    check('options: axpertOption config stored', ax && ax.config.subtype === 'iview' && ax.config.target === 'ivsales', JSON.stringify(ax));
+    await p.goto(APP + '/options'); await p.waitForTimeout(1500);
+    check('options list: placeholder types are marked "Config only"', (await tid('option-Pay the fee').innerText()).includes('Config only') && !(await tid('option-Get policy').innerText()).includes('Config only'));
+    for (const c of ['Show balances', 'Pay the fee', 'Open iview']) {
+      await tid(`run-${c}`).click(); await wait(1000);
+      check(`options RUN ${c}: "isn't wired up yet" state`, (await tid('not-wired').count()) === 1 && (await has("isn't wired up yet")));
+      await p.goBack(); await wait(800);
+    }
+    await tid('run-Show balances').click(); await wait(1000);
+    check('options RUN placeholder: saved configuration is shown', (await has('leaveBalances')) && (await has('nameValuePair')));
+
+    // ---- applicable to: same show/hide mechanism as struct sections
+    await p.goto(APP + '/options/new'); await p.waitForTimeout(1500);
+    await fillCaption('Scoped option'); await optType('Upload');
+    check('applicable to: not-enforced notice + categories default to All', (await has('not enforced yet')) && (await tid('applicable-uc-all').getAttribute('aria-checked')) === 'true');
+    check('applicable to: All categories -> both scope blocks shown', (await tid('block-affiliate').count()) === 1 && (await tid('block-employee').count()) === 1);
+    await tid('applicable-uc-selected').click(); await wait(500);
+    check('applicable to: Selected with nothing chosen -> no blocks', (await tid('block-affiliate').count()) === 0 && (await tid('block-employee').count()) === 0);
+    await saveOpt();
+    check('applicable to: selecting no category is rejected', await has('choose at least one category'));
+    await tid('cat-employee').click(); await wait(600);
+    check('applicable to: category "employee" -> Employee scope appears, Affiliate does not', (await tid('block-employee').count()) === 1 && (await tid('block-affiliate').count()) === 0);
+    await tid('cat-affiliate').click(); await wait(600);
+    check('applicable to: adding "affiliate" -> Affiliate scope appears too', (await tid('block-affiliate').count()) === 1 && (await tid('block-employee').count()) === 1);
+    await tid('cat-employee').click(); await wait(600);
+    check('applicable to: removing "employee" -> its block disappears again', (await tid('block-employee').count()) === 0 && (await tid('block-affiliate').count()) === 1);
+    await tid('cat-employee').click(); await wait(600);
+    await tid('scope-employee-departments-selected').click(); await wait(300);
+    await saveOpt();
+    check('applicable to: "Selected" scope with no values is rejected', await has('add at least one value'));
+    await tid('scope-employee-departments-input').fill('HR'); await p.keyboard.press('Enter');
+    await tid('scope-employee-departments-input').fill('Finance'); await p.keyboard.press('Enter'); await wait(300);
+    await tid('scope-employee-branches-selected').click(); await tid('scope-employee-branches-input').fill('Pune'); await p.keyboard.press('Enter');
+    await tid('scope-affiliate-affiliates-selected').click(); await tid('scope-affiliate-affiliates-input').fill('Acme'); await p.keyboard.press('Enter');
+    await tid('cat-custom-input').fill('Guest'); await p.keyboard.press('Enter'); await wait(300);
+    await saveOpt();
+    const sc = await findOpt('Scoped option');
+    check('applicable to: stored shape (categories, affiliate scope, employee scope)', sc && JSON.stringify(sc.applicableTo.userCategories) === JSON.stringify({ scope: 'selected', selected: ['affiliate', 'employee', 'guest'] }) && JSON.stringify(sc.applicableTo.affiliate.affiliates.selected) === '["Acme"]' && JSON.stringify(sc.applicableTo.employee.departments.selected) === '["HR","Finance"]' && JSON.stringify(sc.applicableTo.employee.branches.selected) === '["Pune"]' && sc.applicableTo.employee.designations.scope === 'all', JSON.stringify(sc?.applicableTo));
+    check('options list: applicable-to summary shown', (await tid('option-Scoped option').innerText()).includes('Affiliate, Employee, Guest'));
+    // dropping a category drops the hidden block from the stored data (like hidden fields are not saved)
+    await tid('edit-option-Scoped option').click(); await p.waitForTimeout(1500);
+    check('applicable to: edit pre-fills the saved scope', (await tid('scope-employee-departments-selected').getAttribute('aria-checked')) === 'true' && (await has('Finance')));
+    await tid('cat-affiliate').click(); await wait(600); await saveOpt();
+    const sc2 = await findOpt('Scoped option');
+    check('applicable to: hidden block is not saved', !('affiliate' in sc2.applicableTo) && !!sc2.applicableTo.employee, JSON.stringify(sc2.applicableTo));
+
+    // ---- edit + delete
+    await p.goto(APP + '/options'); await p.waitForTimeout(1500);
+    await tid('edit-option-Apply for E2E leave').click(); await p.waitForTimeout(1500);
+    check('options edit: id shown, read-only', (await tid('option-id').inputValue()) === di.id && (await tid('option-id').getAttribute('readonly')) !== null);
+    check('options edit: fields pre-filled', (await tid('option-caption').inputValue()) === 'Apply for E2E leave' && (await tid('cfg-structName').inputValue()) === 'options target');
+    await fillCaption('Apply for E2E leave (v2)'); await saveOpt();
+    const di2 = await getOpt(di.id);
+    check('options edit: saved (id + createdAt kept, modifiedAt set)', di2.caption === 'Apply for E2E leave (v2)' && di2.id === di.id && di2.createdAt === di.createdAt && !!di2.modifiedAt && (await has('Option updated')));
+    await tid('delete-option-Apply for E2E leave (v2)').click(); await wait(600);
+    check('options delete: asks for confirmation', (await tid('confirm-delete').count()) === 1 && (await has('Delete this option?')));
+    await click('Cancel'); await wait(500);
+    check('options delete: cancel keeps it', (await tid('option-Apply for E2E leave (v2)').count()) === 1);
+    await tid('delete-option-Apply for E2E leave (v2)').click(); await wait(500);
+    await tid('confirm-delete-btn').click(); await wait(1200);
+    check('options delete: removed from the list + toast', (await tid('option-Apply for E2E leave (v2)').count()) === 0 && (await has('Option deleted')));
+    check('options delete: gone from the API (404)', (await fetch(`${API}/api/options/${di.id}`)).status === 404);
+    check('options delete: an attached file survives deleting an option', (await fetch(`${API}/api/files/${dl1.config.fileId}`)).status === 200);
+
+    // ---- reachability: standalone route + chrome-less iframe routes, no dependence on app nav
+    await p.goto(`${APP}/options/${up.id}/run`); await p.waitForTimeout(2000);
+    check('reach: deep link /options/:id/run works directly', (await tid('upload-drop').count()) === 1);
+    await p.goto(`${APP}/embed/options`); await p.waitForTimeout(2000);
+    check('reach: /embed/options lists options without the studio chrome', (await tid('nav-options').count()) === 0 && (await tid('option-Send a document').count()) === 1);
+    await p.goto(`${APP}/embed/options/${up.id}/run`); await p.waitForTimeout(2000);
+    check('reach: /embed/options/:id/run runs the option in the embed', (await tid('upload-drop').count()) === 1 && (await tid('nav-options').count()) === 0);
+    await p.goto(`${APP}/embed/options/new`); await p.waitForTimeout(1500);
+    check('reach: /embed/options/new shows the builder in the embed', (await tid('option-caption').count()) === 1 && (await tid('nav-options').count()) === 0);
+    // the components work inside a host page with NO router (host-demo imports only the public package API)
+    await p.goto(`${APP}/host-demo.html?options=1&struct=options-target`); await p.waitForTimeout(3000);
+    check('reach: <OptionsList> + <OptionRun> work inside a host page (no router)', (await has('Options in the host app')) && (await tid('option-Send a document').count()) === 1);
+    await tid('run-Send a document').click(); await wait(1200);
+    check('reach: host page runs an option in place', (await tid('upload-drop').count()) === 1);
+    await p.goto(`${APP}/host-demo.html?options=1&struct=options-target`); await p.waitForTimeout(2500);
+    {
+      const [d] = await Promise.all([p.waitForEvent('download', { timeout: 10000 }), tid('run-Get policy').click()]);
+      check('reach: host page runs a download option in place (real download, same bytes)', d.suggestedFilename() === fname && Buffer.compare(await readDl(d), content) === 0);
+    }
+    await post('/api/options', { caption: 'Host opens form', type: 'dataInput', config: { structName: 'Options Target' } });
+    await p.reload(); await p.waitForTimeout(2500);
+    await tid('run-Host opens form').click(); await wait(1500);
+    check('reach: host page receives the struct via onOpenStruct and shows its form itself', (await tid('host-opened').count()) === 1 && (await has('Options Target')) && (await tid('submit').count()) === 1);
+  });
+
   // ---------------------------------------------------------------- embedding (key, ref, component, iframe)
   await step('embedding', async () => {
     const H = { 'content-type': 'application/json' };
@@ -550,6 +769,7 @@ http.createServer((req, res) => {
 
   // ---------------------------------------------------------------- api
   await step('server', async () => {
+    const H = { 'content-type': 'application/json' };
     const post = (path, body) => fetch(API + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async r => [r.status, await r.json()]);
     const put = (path, body) => fetch(API + path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async r => [r.status, await r.json()]);
     let [s] = await post('/api/structs', {}); check('api: struct no name -> 400', s === 400);
@@ -571,6 +791,25 @@ http.createServer((req, res) => {
     [s] = await put(`/api/structs/${structId}`, { name: '', fields: [] }); check('api: PUT invalid -> 400', s === 400);
     const list = (await (await fetch(`${API}/api/structs`)).json()).structs.find(x => x.id === structId);
     check('api: list has field/section/record counts + modifiedAt', list.fieldCount === 15 && list.sectionCount === 1 && list.recordCount === (await (await fetch(`${API}/api/structs/${structId}/records`)).json()).records.length && !!list.modifiedAt, JSON.stringify(list));
+    // files + options API
+    const fj = (path, init) => fetch(API + path, init).then(async r => [r.status, await r.json().catch(() => ({}))]);
+    [s] = await fj('/api/files/nope'); check('api: unknown file -> 404', s === 404);
+    [s] = await fj('/api/files', { method: 'POST' }); check('api: upload without a file -> 400', s === 400);
+    { const fd = new FormData(); fd.append('file', new Blob([new Uint8Array(10)]), 'a.bin'); const [us, uj] = await fj('/api/files', { method: 'POST', body: fd }); check('api: upload -> 201 with fileId, no server path exposed', us === 201 && !!uj.fileId && !('storedPath' in uj.file)); }
+    for (const [why, body] of [
+      ['without a caption', { type: 'upload' }],
+      ['with a bad type', { caption: 'x', type: 'zzz' }],
+      ['dataInput without structName', { caption: 'x', type: 'dataInput', config: {} }],
+      ['download with an unknown file', { caption: 'x', type: 'download', config: { fileId: 'nope' } }],
+      ['apiDisplay with bad displayAs', { caption: 'x', type: 'apiDisplay', config: { displayAs: 'chart' } }],
+      ['axpertOption with bad subtype', { caption: 'x', type: 'axpertOption', config: { subtype: 'report' } }],
+      ['with a bad userCategories scope', { caption: 'x', type: 'upload', applicableTo: { userCategories: { scope: 'maybe' } } }],
+      ['with a selected scope and no values', { caption: 'x', type: 'upload', applicableTo: { userCategories: { scope: 'selected', selected: ['employee'] }, employee: { departments: { scope: 'selected', selected: [] } } } }],
+    ]) {
+      [s] = await fj('/api/options', { method: 'POST', headers: H, body: JSON.stringify(body) }); check(`api: option ${why} -> 400`, s === 400);
+    }
+    [s] = await fj('/api/options/nope'); check('api: unknown option -> 404', s === 404);
+    [s] = await fj('/api/options/nope', { method: 'DELETE' }); check('api: delete unknown option -> 404', s === 404);
     const st = (await post('/api/structs', { name: 'T', fields: [{ id: 'm', label: 'M', type: 'mobile', required: true }] }))[1].structId;
     [s] = await post(`/api/structs/${st}/records`, { data: { m: 'abc' } }); check('api: invalid mobile rejected server-side', s === 400, s);
     const st2 = (await post('/api/structs', { name: 'T2', fields: [{ id: 'l', label: 'L', type: 'list', options: ['a', 'b'] }, { id: 't', label: 'T', type: 'time' }] }))[1].structId;
@@ -580,6 +819,7 @@ http.createServer((req, res) => {
 
   const noise = errs.filter(e => !/404 \(Not Found\)|xx GET .*does-not-exist|xx \(selection\) http:\/\/localhost:4199|ERR_CONNECTION_REFUSED|Failed to load resource|\[warn\]/.test(e));
   console.log('\nUnexpected browser errors:', noise.length ? noise : 'none');
+  check('no unexpected browser console errors (React warnings, uncaught errors)', noise.length === 0, noise.slice(0, 3).join(' | '));
 
   // cleanup: remove every struct (and its records) created during this run
   try {
@@ -593,8 +833,16 @@ http.createServer((req, res) => {
       if (sj.key) await r.hdel('structs:keys', sj.key);
       await r.del(`records:${id}:index`, `struct:${id}`); await r.srem('structs:index', id); removed++;
     }
+    let removedOpt = 0, removedFiles = 0;
+    for (const id of await r.smembers('options:index')) { if (existingOptions.has(id)) continue; await r.del(`option:${id}`); await r.srem('options:index', id); removedOpt++; }
+    for (const id of await r.smembers('files:index')) {
+      if (existingFiles.has(id)) continue;
+      const m = JSON.parse((await r.get(`file:${id}`)) || '{}');
+      try { if (m.storedPath) require('fs').unlinkSync(m.storedPath); } catch (_) {}
+      await r.del(`file:${id}`); await r.srem('files:index', id); removedFiles++;
+    }
     r.disconnect();
-    console.log(`Cleanup: removed ${removed} structs created by this run`);
+    console.log(`Cleanup: removed ${removed} structs, ${removedOpt} options, ${removedFiles} uploaded files created by this run`);
   } catch (e) { console.log('Cleanup skipped:', e.message); }
 
   const fails = results.filter(r => !r.ok);

@@ -121,6 +121,21 @@ Messages the embed sends to `window.parent` (all `{ source: 'tstruct', type, ...
 
 The embed page has no sidebar/header and a transparent background.
 
+## 3b. Options in a host app
+
+The standalone **Options** feature ([options.md](options.md)) can be used both ways:
+
+* **Components** — `OptionsList`, `OptionBuilder`, `OptionRun` (self-contained, no router). Example:
+  ```jsx
+  <OptionsList onRun={(o) => setRunning(o)} onEdit={(o) => openBuilder(o.id)} />
+  {running && <OptionRun option={running} onOpenStruct={(struct) => showFormFor(struct)} />}
+  ```
+  `onOpenStruct` is how a `dataInput` option asks the host to open a struct's form; without it the form is rendered inline. `download` / `upload` options work on their own. API helpers: `listOptions`, `createOption`, `uploadFile`, `downloadFile`, … (`downloadFile` sends the configured auth headers).
+* **iframe** — `/embed/options` (list), `/embed/options/new`, `/embed/options/:id/edit`, `/embed/options/:id/run`; same query parameters as the form embed (`theme`, `origin`, `apiUrl`). Messages: `tstruct:option-saved { option, isNew }`, `tstruct:option-deleted { option }`, `tstruct:option-run { optionId, type }`, `tstruct:resize`. Inside the iframe, running a `dataInput` option navigates to `/embed/:struct/form`.
+* **Plain link** — `/options` (the full studio).
+
+`host-demo.html?options=1` shows the components in a fake host page.
+
 ## 4. Linking records to the host: `ref` and `meta`
 
 Records may carry two optional fields set by the host:

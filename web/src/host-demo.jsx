@@ -8,9 +8,10 @@
 //   values={"days":3} pre-filled values (URL-encoded JSON)
 //   brand=green       re-brand through the theme prop
 //   iframe=1          use the /embed page inside an <iframe> instead of the component
+//   options=1         show the Options components (<OptionsList>, <OptionRun>) instead - no router involved
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { RecordList, StructForm, TstructProvider, configure } from '@tstruct/react';
+import { OptionRun, OptionsList, RecordList, StructForm, TstructProvider, configure } from '@tstruct/react';
 
 const q = new URLSearchParams(window.location.search);
 const struct = q.get('struct') || '';
@@ -27,6 +28,38 @@ const API = q.get('api') || 'http://localhost:4000';
 const brand = q.get('brand') === 'green' ? { primary: '#0a7d5a', primarySoft: '#e3f6ef', gradient: ['#4fd1a5', '#0a7d5a'] } : undefined;
 
 configure({ apiUrl: API, user: 'host-user' });
+
+// Options inside a host app: the host decides what happens when a dataInput option wants to open a struct's form.
+function OptionsDemo() {
+  const [running, setRunning] = useState(null);
+  const [opened, setOpened] = useState(null);
+  return (
+    <>
+      <section>
+        <h2 style={{ margin: '0 0 12px' }}>Options in the host app</h2>
+        <OptionsList
+          onRun={(o) => {
+            setOpened(null);
+            setRunning(o);
+          }}
+        />
+      </section>
+      {running ? (
+        <section data-testid="host-run">
+          <OptionRun key={running.id} option={running} onOpenStruct={(s) => setOpened(s)} />
+          {opened ? (
+            <div data-testid="host-opened" style={{ marginTop: 16 }}>
+              <p>
+                Host received the struct to open: <b>{opened.name}</b>
+              </p>
+              <StructForm struct={opened.id} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+    </>
+  );
+}
 
 function Host() {
   const [events, setEvents] = useState([]);
@@ -53,6 +86,8 @@ function Host() {
         <span style={{ opacity: 0.7 }}>host application (demo) · order {recordRef}</span>
       </header>
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24, display: 'grid', gap: 24 }}>
+        {q.get('options') === '1' ? <OptionsDemo /> : null}
+        {q.get('options') === '1' ? null : (
         <section>
           <h2 data-testid="host-title" style={{ margin: '0 0 12px' }}>{q.get('iframe') === '1' ? 'Embedded via iframe' : 'Embedded via <StructForm />'}</h2>
           {q.get('iframe') === '1' ? (
@@ -75,10 +110,13 @@ function Host() {
             />
           )}
         </section>
+        )}
+        {q.get('options') === '1' ? null : (
         <section>
           <h2 style={{ margin: '0 0 12px' }}>Records linked to {recordRef}</h2>
           <RecordList struct={struct} recordRef={recordRef} refreshKey={refresh} />
         </section>
+        )}
         <section>
           <h3 style={{ margin: '0 0 8px' }}>Host event log</h3>
           <pre data-testid="host-events" style={{ background: '#fff', border: '1px solid #ddd', padding: 12, minHeight: 40, whiteSpace: 'pre-wrap' }}>{events.join('\n')}</pre>

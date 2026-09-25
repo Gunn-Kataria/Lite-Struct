@@ -3,13 +3,16 @@ const cors = require('cors');
 const logger = require('./lib/logger');
 const structsRouter = require('./routes/structs');
 const recordsRouter = require('./routes/records');
+const optionsRouter = require('./routes/options');
+const filesRouter = require('./routes/files');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 // CORS: open by default. Set CORS_ORIGINS="https://host-app.example,http://localhost:5173" to allow only those origins.
 const origins = (process.env.CORS_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean);
-app.use(cors(origins.length ? { origin: origins } : {}));
+// Content-Disposition is exposed so browser code can read the file name of a download.
+app.use(cors({ ...(origins.length ? { origin: origins } : {}), exposedHeaders: ['Content-Disposition'] }));
 app.use(express.json());
 
 // Log every request in/out with timing.
@@ -44,6 +47,8 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api/structs', structsRouter);
 app.use('/api/structs/:structId/records', recordsRouter);
+app.use('/api/options', optionsRouter);
+app.use('/api/files', filesRouter);
 
 // Basic error handler
 app.use((err, req, res, next) => {

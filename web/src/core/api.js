@@ -91,3 +91,83 @@ export async function fetchSelectionItems(apiUrl) {
     throw e;
   }
 }
+
+/* ------------------------------------------------------------------ options + files */
+const authHeaders = async () => {
+  const h = { ...config.headers };
+  if (config.user) h['X-Tstruct-User'] = config.user;
+  if (config.getAuthToken) {
+    const token = await config.getAuthToken();
+    if (token) h.Authorization = `Bearer ${token}`;
+  }
+  return h;
+};
+const base = () => config.apiUrl.replace(/\/$/, '');
+
+// Options (standalone configurable actions)
+export const listOptions = () => request('GET', '/api/options').then((r) => r.options);
+export const getOption = (optionId) => request('GET', `/api/options/${enc(optionId)}`).then((r) => r.option);
+export const createOption = (payload) => request('POST', '/api/options', payload);
+export const updateOption = (optionId, payload) => request('PUT', `/api/options/${enc(optionId)}`, payload);
+export const deleteOption = (optionId) => request('DELETE', `/api/options/${enc(optionId)}`);
+
+// Files
+export const listFiles = () => request('GET', '/api/files').then((r) => r.files);
+
+// multipart upload (form field "file"); resolves { fileId, file }
+export async function uploadFile(file) {
+  const url = `${base()}/api/files`;
+  log.info(`-> POST ${url} (upload "${file.name}", ${file.size} bytes)`);
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', headers: await authHeaders(), body: fd }); // browser sets the multipart boundary
+  } catch (e) {
+    log.error('xx upload network error', { message: e.message });
+    throw new Error(`Cannot reach server at ${config.apiUrl}. Is it running?`);
+  }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    log.error(`xx POST ${url} ${res.status}`, json);
+    const err = new Error(json.error || `Upload failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  log.info(`<- POST ${url} ${res.status}`, json);
+  return json;
+}
+
+// Downloads a stored file to the user's device (fetch + blob so the auth headers are sent, then a temporary <a download>).
+// Resolves { name, size }.
+export async function downloadFile(fileId) {
+  const url = `${base()}/api/files/${enc(fileId)}`;
+  log.info(`-> GET ${url} (download)`);
+  let res;
+  try {
+    res = await fetch(url, { headers: await authHeaders() });
+  } catch (e) {
+    log.error('xx download network error', { message: e.message });
+    throw new Error(`Cannot reach server at ${config.apiUrl}. Is it running?`);
+  }
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    log.error(`xx GET ${url} ${res.status}`, json);
+    throw new Error(json.error || `Download failed (${res.status})`);
+  }
+  const disp = res.headers.get('Content-Disposition') || '';
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+  const plain = /filename="([^"]+)"/i.exec(disp);
+  const name = star ? decodeURIComponent(star[1]) : plain ? plain[1] : 'download';
+  const blob = await res.blob();
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 10000);
+  log.info(`<- GET ${url} 200 (saved as "${name}", ${blob.size} bytes)`);
+  return { name, size: blob.size };
+}

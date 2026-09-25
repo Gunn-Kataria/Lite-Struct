@@ -26,6 +26,7 @@ Format: JSON in, JSON out (`Content-Type: application/json`).
 | `401` | Missing/wrong bearer token (only when `API_TOKEN` is set) |
 | `404` | Struct or record not found |
 | `409` | `key` already in use |
+| `413` | Uploaded file larger than `MAX_UPLOAD_MB` |
 | `500` | Unhandled server error (`{ "error": "Internal server error" }`) |
 
 ## Summary
@@ -41,6 +42,14 @@ Format: JSON in, JSON out (`Content-Type: application/json`).
 | GET | `/api/structs/:structId/records[?ref=…]` | List records of a struct (optionally only those with a `ref`) |
 | GET | `/api/structs/:structId/records/:recordId` | One record |
 | PUT | `/api/structs/:structId/records/:recordId` | Replace a record's data |
+| POST | `/api/options` | Create an option |
+| GET | `/api/options` | List options |
+| GET | `/api/options/:optionId` | One option |
+| PUT | `/api/options/:optionId` | Replace an option |
+| DELETE | `/api/options/:optionId` | Delete an option |
+| POST | `/api/files` | Upload a file (multipart) |
+| GET | `/api/files` | List uploaded files (metadata) |
+| GET | `/api/files/:fileId` | Download a file |
 
 ---
 
@@ -144,6 +153,74 @@ curl -X PUT localhost:4000/api/structs/$SID/records/$RID -H 'content-type: appli
 ```
 
 ---
+
+## Options
+
+An **Option** is a standalone configurable action (not tied to a struct). Guide: [options.md](options.md).
+
+```json
+{ "id": "…", "caption": "Apply for leave", "type": "dataInput", "config": { "structName": "Leave Request" },
+  "applicableTo": { "userCategories": { "scope": "all", "selected": [] }, "affiliate": { … }, "employee": { … } },
+  "createdBy": "anonymous", "createdAt": "…", "modifiedBy": "…", "modifiedAt": "…" }
+```
+
+| `type` | `config` | Validation |
+|---|---|---|
+| `dataInput` | `{ structName }` | non-empty string (the struct is only looked up when the option is run) |
+| `download` | `{ fileId }` | the file must exist (`POST /api/files` first) |
+| `upload` | `{}` | — |
+| `apiDisplay` | `{ apiName, displayAs }` | `displayAs` ∈ `table`, `nameValuePair`, `text` |
+| `pay` | `{ paymentConfig }` | string |
+| `axpertOption` | `{ subtype, target }` | `subtype` ∈ `tstruct`, `smartView`, `iview`, `customPage` |
+
+`applicableTo` (optional, stored but **never enforced** — no user identity yet; see [options.md](options.md#applicable-to)):
+`{ userCategories: { scope: 'all'|'selected', selected: [...] }, affiliate?: { affiliates: Scope }, employee?: { departments, branches, designations: Scope } }` with `Scope = { scope: 'all'|'selected', selected: string[] }`. The `affiliate` / `employee` blocks are kept only when the (effective) categories contain that category — the same show/hide condition mechanism as struct sections; irrelevant blocks are dropped, missing ones get `{ scope: 'all' }` defaults, category names are lower-cased. Selected scopes need at least one value.
+
+### Create — `POST /api/options`
+Body `{ caption, type, config, applicableTo? }`. `201 { optionId, option }` (normalised). `400` on a missing caption, unknown type, invalid config (see table) or invalid `applicableTo`.
+
+```bash
+curl -X POST localhost:4000/api/options -H 'content-type: application/json' \
+  -d '{"caption":"Apply for leave","type":"dataInput","config":{"structName":"Leave Request"}}'
+```
+
+### List — `GET /api/options`
+`200 { "options": [ … ] }`, newest first.
+
+### Get — `GET /api/options/:optionId`
+`200 { "option": {…} }` · `404 { "error": "Option not found" }`
+
+### Update — `PUT /api/options/:optionId`
+Same body as create; replaces caption/type/config/applicableTo. `id`, `createdBy`, `createdAt` are kept; `modifiedBy`/`modifiedAt` set. `200 { optionId, option }` · `400` · `404`.
+
+### Delete — `DELETE /api/options/:optionId`
+`200 { optionId, deleted: true }` · `404`. A file the option referenced is **not** deleted.
+
+## Files
+
+Uploaded files are stored on the API server's disk (`server/uploads/`); metadata in Redis. See [options.md](options.md#file-storage).
+
+### Upload — `POST /api/files`
+`multipart/form-data` with one field named `file`. `201`:
+```json
+{ "fileId": "c3a7…", "file": { "id": "c3a7…", "originalName": "policy.pdf", "mimeType": "application/pdf", "size": 300000,
+  "uploadedAt": "…", "uploadedBy": "anonymous" } }
+```
+`400 { error }` when no file is sent · `413` when larger than `MAX_UPLOAD_MB` (default 25). UTF-8 file names are preserved. The server-side path is never returned.
+
+```bash
+curl -X POST localhost:4000/api/files -F "file=@policy.pdf"
+```
+
+### List — `GET /api/files`
+`200 { "files": [ …metadata… ] }`, newest first (used to pick a previously uploaded file).
+
+### Download — `GET /api/files/:fileId`
+Streams the file with `Content-Disposition: attachment; filename="…"; filename*=UTF-8''…`, the stored `Content-Type`, `Content-Length` and `X-Content-Type-Options: nosniff`. `404 { "error": "File not found" }`. `Content-Disposition` is exposed to cross-origin browser code (CORS `exposedHeaders`).
+
+```bash
+curl -OJ localhost:4000/api/files/<fileId>      # saves it under its original name
+```
 
 ## Data conventions for `record.data`
 

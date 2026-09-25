@@ -56,4 +56,14 @@ async function hdel(hashKey, field) {
   logger.debug({ event: 'redis.hdel', hashKey, field }, 'Redis HDEL');
 }
 
-module.exports = { redis, getJSON, setJSON, sadd, smembers, scard, hget, hset, hdel };
+async function srem(setKey, member) {
+  await redis.srem(setKey, member);
+  logger.debug({ event: 'redis.srem', setKey, member }, 'Redis SREM');
+}
+
+async function del(key) {
+  await redis.del(key);
+  logger.debug({ event: 'redis.del', key }, 'Redis DEL');
+}
+
+module.exports = { redis, getJSON, setJSON, sadd, smembers, scard, srem, del, hget, hset, hdel };

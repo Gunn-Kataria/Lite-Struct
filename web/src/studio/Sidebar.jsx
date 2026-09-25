@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import styled, { useTheme } from 'styled-components';
-import { Boxes, LayoutDashboard, Monitor, Moon, Plus, Search, Settings2, Sun, Table2, X } from 'lucide-react';
+import { Boxes, LayoutDashboard, Monitor, Moon, Plus, Search, Settings2, SlidersHorizontal, Sun, Table2, X } from 'lucide-react';
 import { Button, IconButton, Skeleton, Text } from '../ui/kit';
 import { useStructs } from './StructsContext';
 import { useThemeMode } from '../ui/theme';
@@ -188,6 +188,7 @@ export default function Sidebar({ variant = 'sidebar' }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: t.spacing.md }}>
         <NavLink testID="nav-overview" icon={LayoutDashboard} label="Overview" active={pathname === '/'} onPress={() => go('/')} />
+        <NavLink testID="nav-options" icon={SlidersHorizontal} label="Options" active={pathname.startsWith('/options')} onPress={() => go('/options')} />
         <NavLink testID="nav-definitions" icon={Settings2} label="Definitions" active={pathname === '/structs' || pathname === '/structs/new' || pathname.endsWith('/edit')} onPress={() => go('/structs')} />
       </div>
 
